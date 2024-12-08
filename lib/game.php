@@ -1,16 +1,10 @@
 <?php
+require_once "helpers.php";
 
 function show_status() {
     global $mysqli;
 
-    if (!isset($_GET['game_id']) || empty($_GET['game_id'])) {
-        header('HTTP/1.1 400 Bad Request');
-        echo json_encode(['error' => 'game_id is required']);
-        exit;
-    }
-
-    $game_id = $_GET['game_id'];
-
+    $game_id = get_game_id('GET'); 
     $sql = 'SELECT g.game_id, g.status, g.start_time, g.end_time, gs.current_turn_player_id 
             FROM games g
             LEFT JOIN gamestate gs ON g.game_id = gs.game_id
@@ -18,14 +12,11 @@ function show_status() {
     $st = $mysqli->prepare($sql);
 
     if (!$st) {
-        header('HTTP/1.1 500 Internal Server Error');
-        echo json_encode(['error' => 'Failed to prepare statement']);
-        exit;
+        respond_with_error(500, 'Failed to prepare statement');
     }
 
-    $st->bind_param('i', $game_id);
-
     try {
+        $st->bind_param('i', $game_id);
         $st->execute();
         $res = $st->get_result();
 
@@ -33,12 +24,10 @@ function show_status() {
             header('Content-type: application/json');
             echo json_encode($res->fetch_all(MYSQLI_ASSOC), JSON_PRETTY_PRINT);
         } else {
-            header('HTTP/1.1 404 Not Found');
-            echo json_encode(['error' => 'Game not found']);
+            respond_with_error(404, 'Game not found');
         }
     } catch (Exception $e) {
-        header('HTTP/1.1 500 Internal Server Error');
-        echo json_encode(['error' => 'Failed to execute query']);
+        respond_with_error(500, 'Failed to execute query: ' . $e->getMessage());
     }
 }
 ?>

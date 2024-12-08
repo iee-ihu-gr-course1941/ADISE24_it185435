@@ -1,23 +1,15 @@
 <?php
+require_once "helpers.php";
 
 function show_board() {
     global $mysqli;
 
-    if (!isset($_GET['game_id']) || empty($_GET['game_id'])) {
-        header('HTTP/1.1 400 Bad Request');
-        echo json_encode(['error' => 'game_id is required']);
-        exit;
-    }
-
-    $game_id = $_GET['game_id'];
-
+    $game_id = get_game_id('GET'); 
     $sql = 'SELECT * FROM tiles WHERE game_id = ? ORDER BY tile_id';
     $st = $mysqli->prepare($sql);
 
     if (!$st) {
-        header('HTTP/1.1 500 Internal Server Error');
-        echo json_encode(['error' => 'Failed to prepare statement']);
-        exit;
+        respond_with_error(500, 'Failed to prepare statement');
     }
 
     $st->bind_param('i', $game_id);
@@ -31,21 +23,12 @@ function show_board() {
 function reset_board() {
     global $mysqli;
 
-    if (!isset($_POST['game_id']) || empty($_POST['game_id'])) {
-        header('HTTP/1.1 400 Bad Request');
-        echo json_encode(['error' => 'game_id is required']);
-        exit;
-    }
-
-    $game_id = $_POST['game_id'];
-
+    $game_id = get_game_id('POST'); 
     $sql = 'CALL clean_board(?)';
     $st = $mysqli->prepare($sql);
 
     if (!$st) {
-        header('HTTP/1.1 500 Internal Server Error');
-        echo json_encode(['error' => 'Failed to prepare statement']);
-        exit;
+        respond_with_error(500, 'Failed to prepare statement');
     }
 
     $st->bind_param('i', $game_id);
@@ -54,4 +37,3 @@ function reset_board() {
     show_board();
 }
 ?>
-
