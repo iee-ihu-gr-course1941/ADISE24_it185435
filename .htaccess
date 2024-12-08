@@ -11,6 +11,3 @@ php_value error_log logs/PHP_errors.log
 # Apache > 2.4 requires:
 Require all granted
 </Limit>
-<Files "lib/db_upass.php">
-    Require all denied
-</Files>
