@@ -1,51 +1,62 @@
 <?php
+
 require_once "helpers.php";
 
-function show_board() {
+function handle_board($method, $request, $input) {
     global $mysqli;
 
-    $game_id = get_game_id('GET'); 
-    $sql = 'SELECT * FROM tiles WHERE game_id = ? ORDER BY tile_id';
-    $st = $mysqli->prepare($sql);
+    if ($method === 'GET') {
+        $game_id = $_GET['game_id'] ?? null;
 
-    if (!$st) {
-        respond_with_error(500, 'Failed to prepare statement');
+        if (!$game_id) {
+            respond_with_error(400, "Game ID is required");
+        }
+
+        show_board($game_id);
+    } elseif ($method === 'POST') {
+        reset_board($input);
+    } else {
+        respond_with_error(405, "Method not allowed");
     }
-
-    $st->bind_param('i', $game_id);
-    $st->execute();
-
-    $res = $st->get_result();
-    header('Content-type: application/json');
-    echo json_encode($res->fetch_all(MYSQLI_ASSOC), JSON_PRETTY_PRINT);
 }
 
-function reset_board() {
+function show_board($game_id) {
     global $mysqli;
 
-    $input = json_decode(file_get_contents('php://input'), true);
+    $query = "SELECT * FROM board WHERE game_id = ? ORDER BY x, y";
+    $stmt = $mysqli->prepare($query);
+    $stmt->bind_param('i', $game_id);
+    $stmt->execute();
 
-    if (!isset($input['game_id']) || empty($input['game_id'])) {
-        header('HTTP/1.1 400 Bad Request');
-        echo json_encode(['error' => 'game_id is required']);
-        exit;
-    }
+    $result = $stmt->get_result();
+    $board = $result->fetch_all(MYSQLI_ASSOC);
 
-    $game_id = $input['game_id'];
-
-    $sql = 'CALL clean_board(?)';
-    $st = $mysqli->prepare($sql);
-
-    if (!$st) {
-        header('HTTP/1.1 500 Internal Server Error');
-        echo json_encode(['error' => 'Failed to prepare statement']);
-        exit;
-    }
-
-    $st->bind_param('i', $game_id);
-    $st->execute();
-
-    echo json_encode(['message' => 'Board reset successfully']);
+    echo json_encode(["status" => "success", "board" => $board]);
 }
 
+function reset_board($input) {
+    global $mysqli;
+
+    $game_id = $input['game_id'] ?? null;
+
+    if (!$game_id) {
+        respond_with_error(400, "Game ID is required");
+    }
+
+    validate_game_id($game_id);
+
+    // Clear the board
+    $query = "DELETE FROM board WHERE game_id = ?";
+    $stmt = $mysqli->prepare($query);
+    $stmt->bind_param('i', $game_id);
+    $stmt->execute();
+
+    // Reset tiles
+    $query = "UPDATE tiles SET status = 'available' WHERE game_id = ?";
+    $stmt = $mysqli->prepare($query);
+    $stmt->bind_param('i', $game_id);
+    $stmt->execute();
+
+    echo json_encode(["status" => "success", "message" => "Board reset successfully"]);
+}
 ?>
