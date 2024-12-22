@@ -1,62 +1,72 @@
 <?php
 
-require_once "helpers.php";
-
-function handle_board($method, $request, $input) {
+function show_board($input) {
     global $mysqli;
 
-    if ($method === 'GET') {
-        $game_id = $_GET['game_id'] ?? null;
-
-        if (!$game_id) {
-            respond_with_error(400, "Game ID is required");
-        }
-
-        show_board($game_id);
-    } elseif ($method === 'POST') {
-        reset_board($input);
-    } else {
-        respond_with_error(405, "Method not allowed");
-    }
-}
-
-function show_board($game_id) {
-    global $mysqli;
-
-    $query = "SELECT * FROM board WHERE game_id = ? ORDER BY x, y";
-    $stmt = $mysqli->prepare($query);
-    $stmt->bind_param('i', $game_id);
-    $stmt->execute();
-
-    $result = $stmt->get_result();
-    $board = $result->fetch_all(MYSQLI_ASSOC);
-
-    echo json_encode(["status" => "success", "board" => $board]);
-}
-
-function reset_board($input) {
-    global $mysqli;
-
-    $game_id = $input['game_id'] ?? null;
 
     if (!$game_id) {
-        respond_with_error(400, "Game ID is required");
+        header('HTTP/1.1 400 Bad Request');
+        print json_encode(['errormesg' => 'Missing game_id parameter.']);
+        exit;
     }
 
-    validate_game_id($game_id);
+    // Debugging: Εκτύπωσε το game_id
+    error_log("DEBUG: game_id = $game_id");
 
-    // Clear the board
-    $query = "DELETE FROM board WHERE game_id = ?";
-    $stmt = $mysqli->prepare($query);
-    $stmt->bind_param('i', $game_id);
-    $stmt->execute();
+    // SQL Query
+    $query = "SELECT x, y, tile_id, attribute_id, status FROM board WHERE game_id = '$game_id'";
+    $result = $mysqli->query($query);
 
-    // Reset tiles
-    $query = "UPDATE tiles SET status = 'available' WHERE game_id = ?";
-    $stmt = $mysqli->prepare($query);
-    $stmt->bind_param('i', $game_id);
-    $stmt->execute();
+    // Debugging: Έλεγξε αν η SQL εκτελείται
+    if (!$result) {
+        error_log("DEBUG: SQL Error - " . $mysqli->error);
+        header('HTTP/1.1 500 Internal Server Error');
+        print json_encode(['errormesg' => 'Database query failed.']);
+        exit;
+    }
 
-    echo json_encode(["status" => "success", "message" => "Board reset successfully"]);
+    $board = [];
+    while ($row = $result->fetch_assoc()) {
+        $board[] = [
+            'x' => (int)$row['x'],
+            'y' => (int)$row['y'],
+            'tile_id' => (int)$row['tile_id'],
+            'attribute_id' => isset($row['attribute_id']) ? (int)$row['attribute_id'] : null,
+            'status' => $row['status']
+        ];
+    }
+
+    // Debugging: Επιστροφή δεδομένων
+    error_log("DEBUG: Board Data = " . json_encode($board));
+
+    header('Content-Type: application/json');
+    print json_encode(['board' => $board]);
+}
+
+
+
+function reset_board() {
+    global $mysqli;
+
+
+    if (!isset($_POST['game_id'])) {
+        header('HTTP/1.1 400 Bad Request');
+        print json_encode(['errormesg' => 'Missing game_id parameter.']);
+        exit;
+    }
+
+    $game_id = $mysqli->real_escape_string($_POST['game_id']);
+
+    // SQL για την επαναφορά του ταμπλό
+    $query = "DELETE FROM board WHERE game_id = '$game_id'";
+
+    if (!$mysqli->query($query)) {
+        header('HTTP/1.1 500 Internal Server Error');
+        print json_encode(['errormesg' => 'Failed to reset board.']);
+        exit;
+    }
+
+    header('Content-Type: application/json');
+    print json_encode(['message' => 'Board has been reset.']);
 }
 ?>

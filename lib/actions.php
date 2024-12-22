@@ -1,109 +1,150 @@
 <?php
-require_once "helpers.php";
-require_once "lib/game_logic.php";
-require_once "lib/scoring.php";
+require_once "dbconnect.php";
 
-function handle_player($method, $request, $input) {
-    global $mysqli;
-
-    if ($method == 'POST') {
-        $player_name = $input['player_name'] ?? null;
-        $game_id = $input['game_id'] ?? null;
-
-        if ($player_name && $game_id) {
-            $query = "INSERT INTO players (game_id, player_name) VALUES (?, ?)";
-            $stmt = $mysqli->prepare($query);
-            $stmt->bind_param('is', $game_id, $player_name);
-            $stmt->execute();
-
-            echo json_encode(["status" => "success", "message" => "Player added successfully"]);
-        } else {
-            echo json_encode(["error" => "Player name and Game ID are required"]);
-        }
-    } else {
-        header('HTTP/1.1 405 Method Not Allowed');
-        echo json_encode(['error' => 'Method not allowed']);
+// Handle swapping of tiles
+function swap_tiles($input) {
+    global $db;
+    if (!isset($input['game_id']) || !isset($input['player_id']) || !isset($input['tiles'])) {
+        header('HTTP/1.1 400 Bad Request');
+        print json_encode(['errormesg' => 'game_id, player_id, and tiles are required.']);
+        exit;
     }
-}
-function handle_actions($method, $request, $input) {
-    global $mysqli;
 
-    if ($method == 'POST') {
-        $game_id = $input['game_id'] ?? null;
-        $player_id = $input['player_id'] ?? null;
-        $move = $input['move'] ?? null;
+    $gameId = intval($input['game_id']);
+    $playerId = intval($input['player_id']);
+    $tiles = $input['tiles']; // Expecting an array of tile IDs
 
-        if (!$game_id || !$player_id || !$move) {
-            respond_with_error(400, "game_id, player_id, and move are required");
+    try {
+        $db->beginTransaction();
+
+        // Remove the specified tiles from the player
+        $stmt = $db->prepare("DELETE FROM tiles WHERE tile_id = ? AND game_id = ? AND status = 'available'");
+        foreach ($tiles as $tile) {
+            $stmt->execute([$tile, $gameId]);
         }
 
-        validate_game_id($game_id);
+        // Add the swap action to game_history
+        $stmt = $db->prepare("INSERT INTO game_history (game_id, player_id, action_id, turn_number) VALUES (?, ?, (SELECT action_id FROM actions WHERE action_name = 'swap'), (SELECT MAX(turn_number) + 1 FROM game_history WHERE game_id = ?))");
+        $stmt->execute([$gameId, $playerId, $gameId]);
 
-        // Validate the move
-        if (!validate_move($game_id, $move)) {
-            respond_with_error(400, "Invalid move");
-        }
-
-        // Record the move and calculate score
-        $score = calculate_score($game_id, $move);
-        record_action($game_id, $player_id, $move, $score);
-
-        // Move to next player
-        move_to_next_player($game_id);
-
-        echo json_encode(["status" => "success", "score" => $score]);
-    } elseif ($method == 'GET') {
-        $game_id = $_GET['game_id'] ?? null;
-
-        if (!$game_id) {
-            respond_with_error(400, "game_id is required");
-        }
-
-        validate_game_id($game_id);
-        get_game_actions($game_id);
-    } else {
-        respond_with_error(405, "Method not allowed");
+        $db->commit();
+        print json_encode(['status' => 'success', 'message' => 'Tiles swapped.']);
+    } catch (Exception $e) {
+        $db->rollBack();
+        header('HTTP/1.1 500 Internal Server Error');
+        print json_encode(['errormesg' => $e->getMessage()]);
     }
 }
 
-function record_action($game_id, $player_id, $move, $score) {
-    global $mysqli;
-
-    $x = $move['x'];
-    $y = $move['y'];
-    $tile_id = $move['tile_id'];
-
-    // Insert into board
-    $query = "INSERT INTO board (game_id, tile_id, x, y, status) VALUES (?, ?, ?, ?, 'placed')";
-    $stmt = $mysqli->prepare($query);
-    $stmt->bind_param('iiii', $game_id, $tile_id, $x, $y);
-
-    if (!$stmt->execute()) {
-        respond_with_error(500, "Failed to update board: " . $mysqli->error);
+// Handle undoing an action
+function undo_action($input) {
+    global $db;
+    if (!isset($input['game_id']) || !isset($input['player_id'])) {
+        header('HTTP/1.1 400 Bad Request');
+        print json_encode(['errormesg' => 'game_id and player_id are required.']);
+        exit;
     }
 
-    // Insert into game_history
-    $query = "INSERT INTO game_history (game_id, player_id, tile_id, action_time, score) VALUES (?, ?, ?, NOW(), ?)";
-    $stmt = $mysqli->prepare($query);
-    $stmt->bind_param('iiii', $game_id, $player_id, $tile_id, $score);
+    $gameId = intval($input['game_id']);
+    $playerId = intval($input['player_id']);
 
-    if (!$stmt->execute()) {
-        respond_with_error(500, "Failed to record action: " . $mysqli->error);
+    try {
+        $db->beginTransaction();
+
+        // Find the last action by this player
+        $stmt = $db->prepare("SELECT history_id, action_id, tile_id FROM game_history WHERE game_id = ? AND player_id = ? ORDER BY turn_number DESC LIMIT 1");
+        $stmt->execute([$gameId, $playerId]);
+        $lastAction = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$lastAction) {
+            throw new Exception('No actions found to undo.');
+        }
+
+        // Fetch the action ID for 'place'
+        $stmt = $db->prepare("SELECT action_id FROM actions WHERE action_name = 'place'");
+        $stmt->execute();
+        $placeAction = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        // Revert the tile placement if applicable
+        if ($lastAction['action_id'] == $placeAction['action_id']) {
+            $stmt = $db->prepare("UPDATE tiles SET status = 'available', row = NULL, col = NULL WHERE tile_id = ?");
+            $stmt->execute([$lastAction['tile_id']]);
+        }
+
+        // Remove the last action from game_history
+        $stmt = $db->prepare("DELETE FROM game_history WHERE history_id = ?");
+        $stmt->execute([$lastAction['history_id']]);
+
+        $db->commit();
+        print json_encode(['status' => 'success', 'message' => 'Last action undone.']);
+    } catch (Exception $e) {
+        $db->rollBack();
+        header('HTTP/1.1 500 Internal Server Error');
+        print json_encode(['errormesg' => $e->getMessage()]);
     }
 }
 
-function get_game_actions($game_id) {
-    global $mysqli;
+// Handle ending a turn
+function end_turn($input) {
+    global $db;
+    if (!isset($input['game_id']) || !isset($input['player_id'])) {
+        header('HTTP/1.1 400 Bad Request');
+        print json_encode(['errormesg' => 'game_id and player_id are required.']);
+        exit;
+    }
 
-    $query = "SELECT * FROM game_history WHERE game_id = ? ORDER BY action_time ASC";
-    $stmt = $mysqli->prepare($query);
-    $stmt->bind_param('i', $game_id);
-    $stmt->execute();
+    $gameId = intval($input['game_id']);
+    $playerId = intval($input['player_id']);
 
-    $result = $stmt->get_result();
-    $actions = $result->fetch_all(MYSQLI_ASSOC);
+    try {
+        $db->beginTransaction();
 
-    echo json_encode(["status" => "success", "actions" => $actions]);
+        // Update the current turn player
+        $stmt = $db->prepare("UPDATE gamestate SET current_turn_player_id = (SELECT player_id FROM game_players WHERE game_id = ? AND turn_order = ((SELECT turn_order FROM game_players WHERE game_id = ? AND player_id = ?) % (SELECT COUNT(*) FROM game_players WHERE game_id = ?)) + 1) WHERE game_id = ?");
+        $stmt->execute([$gameId, $gameId, $playerId, $gameId, $gameId]);
+
+        // Add the end_turn action to game_history
+        $stmt = $db->prepare("INSERT INTO game_history (game_id, player_id, action_id, turn_number) VALUES (?, ?, (SELECT action_id FROM actions WHERE action_name = 'end_turn'), (SELECT MAX(turn_number) + 1 FROM game_history WHERE game_id = ?))");
+        $stmt->execute([$gameId, $playerId, $gameId]);
+
+        $db->commit();
+        print json_encode(['status' => 'success', 'message' => 'Turn ended.']);
+    } catch (Exception $e) {
+        $db->rollBack();
+        header('HTTP/1.1 500 Internal Server Error');
+        print json_encode(['errormesg' => $e->getMessage()]);
+    }
 }
 
+// Handle leaving the game
+function leave_game($input) {
+    global $db;
+    if (!isset($input['game_id']) || !isset($input['player_id'])) {
+        header('HTTP/1.1 400 Bad Request');
+        print json_encode(['errormesg' => 'game_id and player_id are required.']);
+        exit;
+    }
+
+    $gameId = intval($input['game_id']);
+    $playerId = intval($input['player_id']);
+
+    try {
+        $db->beginTransaction();
+
+        // Mark the player as inactive in the game
+        $stmt = $db->prepare("UPDATE game_players SET is_active = 0 WHERE game_id = ? AND player_id = ?");
+        $stmt->execute([$gameId, $playerId]);
+
+        // Add the leave action to game_history
+        $stmt = $db->prepare("INSERT INTO game_history (game_id, player_id, action_id, turn_number) VALUES (?, ?, (SELECT action_id FROM actions WHERE action_name = 'leave'), (SELECT MAX(turn_number) + 1 FROM game_history WHERE game_id = ?))");
+        $stmt->execute([$gameId, $playerId, $gameId]);
+
+        $db->commit();
+        print json_encode(['status' => 'success', 'message' => 'Player left the game.']);
+    } catch (Exception $e) {
+        $db->rollBack();
+        header('HTTP/1.1 500 Internal Server Error');
+        print json_encode(['errormesg' => $e->getMessage()]);
+    }
+}
 ?>
