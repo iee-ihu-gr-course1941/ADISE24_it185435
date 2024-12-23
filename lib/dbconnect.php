@@ -1,7 +1,8 @@
 <?php
-require_once "db_upass.php";
+
 $host = 'localhost';
 $db = 'mydbqwirkle';
+require_once "db_upass.php";
 $user = $DB_USER;
 $pass = $DB_PASS;
 

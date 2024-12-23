@@ -11,3 +11,14 @@ php_value error_log logs/PHP_errors.log
 # Apache > 2.4 requires:
 Require all granted
 </Limit>
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteBase /MyProject/
+    
+    # Αν το αίτημα δεν αντιστοιχεί σε αρχείο ή φάκελο
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+
+    # Ανακατεύθυνση όλων των αιτημάτων στο qwirkler.php
+    RewriteRule ^(.*)$ qwirkler.php [QSA,L]
+</IfModule>
