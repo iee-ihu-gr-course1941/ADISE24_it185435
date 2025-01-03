@@ -1,8 +1,12 @@
 <?php
 require_once "lib/dbconnect.php";
+
+header('Content-Type: application/json');
+
 if ($mysqli->connect_errno) {
-    echo "Connection failed: " . $mysqli->connect_error;
+    echo json_encode(['status' => 'error', 'message' => 'Connection failed: ' . $mysqli->connect_error]);
 } else {
-    echo "Connection successful!";
+    echo json_encode(['status' => 'success', 'message' => 'Connection successful!']);
 }
+exit();
 ?>

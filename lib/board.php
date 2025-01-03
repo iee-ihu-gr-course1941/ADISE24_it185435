@@ -1,58 +1,67 @@
 <?php
 
 function show_board($game_id) {
-    global $mysqli; 
-
-    if (!$game_id) {
-        header('HTTP/1.1 400 Bad Request');
-        print json_encode(['errormesg' => 'Missing game_id parameter.']);
-        exit;
-    }
-
-    try {
-        $stmt = $mysqli->prepare("SELECT * FROM board WHERE game_id = ?");
-        $stmt->bind_param('i', $game_id);
-        $stmt->execute();
-        $result = $stmt->get_result();
-        $board = $result->fetch_all(MYSQLI_ASSOC);
-
-        if (!$board) {
-            header('HTTP/1.1 404 Not Found');
-            print json_encode(['errormesg' => 'Board not found.']);
-            exit;
-        }
-
-        header('Content-Type: application/json');
-        print json_encode($board);
-    } catch (Exception $e) {
-        header('HTTP/1.1 500 Internal Server Error');
-        print json_encode(['errormesg' => $e->getMessage()]);
-    }
-}
-
-
-function reset_board() {
     global $mysqli;
 
+    $sql_select = "
+        SELECT b.x, b.y, ta.color, ta.shape, b.status
+        FROM board b
+        JOIN tileattributes ta ON b.attribute_id = ta.attribute_id
+        WHERE b.game_id = ?
+    ";
+    $stmt = $mysqli->prepare($sql_select);
+    $stmt->bind_param("i", $game_id);
+    $stmt->execute();
+    $result = $stmt->get_result();
 
-    if (!isset($_POST['game_id'])) {
-        header('HTTP/1.1 400 Bad Request');
-        print json_encode(['errormesg' => 'Missing game_id parameter.']);
+    $board = [];
+    while ($row = $result->fetch_assoc()) {
+        $board[$row['x']][$row['y']] = [
+            "color" => $row['color'],
+            "shape" => $row['shape'],
+            "status" => $row['status']
+        ];
+    }
+    echo json_encode(["board" => $board]);
+}
+function reset_board($game_id) {
+    global $mysqli;
+
+    $sql_delete = "DELETE FROM board WHERE game_id = ?";
+    $stmt = $mysqli->prepare($sql_delete);
+    $stmt->bind_param("i", $game_id);
+    $stmt->execute();
+
+    $sql_select_attributes = "SELECT attribute_id FROM tileattributes LIMIT 25";
+    $result = $mysqli->query($sql_select_attributes);
+
+    $attributes = [];
+    while ($row = $result->fetch_assoc()) {
+        $attributes[] = $row['attribute_id'];
+    }
+
+    if (count($attributes) < 25) {
+        echo json_encode(["error" => "Not enough tiles in the tileattributes table."]);
         exit;
     }
 
-    $game_id = $mysqli->real_escape_string($_POST['game_id']);
+    $sql_insert = "INSERT INTO board (game_id, tile_id, attribute_id, x, y, status) VALUES (?, ?, ?, ?, ?, ?)";
+    $stmt = $mysqli->prepare($sql_insert);
 
-    $query = "DELETE FROM board WHERE game_id = '$game_id'";
+    $status = 'placed';
+    $index = 0;
 
-    if (!$mysqli->query($query)) {
-        header('HTTP/1.1 500 Internal Server Error');
-        print json_encode(['errormesg' => 'Failed to reset board.']);
-        exit;
+    for ($x = 1; $x <= 5; $x++) {
+        for ($y = 1; $y <= 5; $y++) {
+            $attribute_id = intval($attributes[$index]);
+            $tile_id = $attribute_id; // Αν το tile_id βασίζεται στο attribute_id
+            $stmt->bind_param("iiiis", $game_id, $tile_id, $attribute_id, $x, $y, $status);
+            $stmt->execute();
+            $index++;
+        }
     }
 
-    header('Content-Type: application/json');
-    print json_encode(['message' => 'Board has been reset.']);
+    echo json_encode(["message" => "Board has been reset."]);
 }
 function show_tile($x, $y) {
     global $mysqli; 

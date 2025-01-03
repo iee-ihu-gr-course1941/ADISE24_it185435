@@ -1,4 +1,9 @@
 <?php
+
+ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
+
 require_once "lib/dbconnect.php";
 require_once "lib/board.php";
 require_once "lib/actions.php";
@@ -24,7 +29,6 @@ if (isset($_SERVER['HTTP_X_TOKEN'])) {
 } else {
     $input['token'] = '';
 }
-
 // Ασφαλής λήψη του endpoint
 $endpoint = $request[0] ?? null;
 array_shift($request); // Αφαιρεί το πρώτο στοιχείο από το $request
@@ -45,6 +49,62 @@ switch ($endpoint) {
                 exit;
         }
         break;
+	case 'create':
+		if ($method === 'POST') {
+			require_once "lib/actions.php";
+			$player_count = $input['player_count'] ?? 2;
+			if ($player_count < 2 || $player_count > 4) {
+				echo json_encode(['success' => false, 'message' => 'Player count must be between 2 and 4.']);
+				exit;
+			}
+			$game_id = create_game($player_count);
+			if ($game_id) {
+				echo json_encode(['success' => true, 'game_id' => $game_id]);
+			} else {
+				echo json_encode(['success' => false, 'message' => 'Failed to create game.']);
+			}
+		}
+		break;
+	case 'join':
+		if ($method === 'POST') {
+			$game_id = intval($input['game_id'] ?? 0);
+
+			// Έλεγχος αν το Game ID δόθηκε
+			if (!$game_id) {
+				echo json_encode(['success' => false, 'message' => 'Game ID is required.']);
+				exit;
+			}
+
+			// Προσπάθεια προσθήκης παίκτη στο παιχνίδι
+			$result = add_player_to_game($game_id);
+
+			// Έλεγχος αν η συνάρτηση επέστρεψε επιτυχία
+			if (!$result['success']) {
+				echo json_encode(['success' => false, 'message' => $result['message']]);
+				exit;
+			}
+
+			// Ανάκτηση δεδομένων από το αποτέλεσμα
+			$player_id = $result['player_id'] ?? null;
+			$player_count = $result['player_count'] ?? null;
+
+			// Έλεγχος για έγκυρα δεδομένα παίκτη
+			if ($player_id === null || $player_count === null) {
+				echo json_encode(['success' => false, 'message' => 'Failed to retrieve player information.']);
+				exit;
+			}
+
+			// Επιστροφή επιτυχούς απάντησης
+			echo json_encode([
+				'success' => true,
+				'game_id' => $game_id,
+				'player_id' => $player_id,
+				'player_count' => $player_count
+			]);
+			exit;
+	}
+		break;
+
     case 'actions':
 		$action = $input['action'] ?? null;
 
@@ -89,7 +149,40 @@ switch ($endpoint) {
 				}
 				leave_game($input['game_id'], $input['player_id']);
 				break;
+			case 'get_tiles':
+				if ($method === 'GET') {
+					$player_id = intval($input['player_id'] ?? 0);
+					if ($player_id === 0) {
+						echo json_encode(['success' => false, 'message' => 'Player ID is required.']);
+						exit;
+					}
+					echo get_tiles($player_id);
+				} else {
+					echo json_encode(['success' => false, 'message' => 'Invalid request method.']);
+				}
+				break;
+			case 'place_tile':
+				header('Content-Type: application/json');
+				try {
+					if ($method === 'POST') {
+						error_log("Input: " . json_encode($input));
+						$game_id = intval($input['game_id'] ?? 0);
+						$tile_id = intval($input['tile'] ?? 0);
+						$position = $input['position'] ?? null;
 
+						if ($game_id === 0 || $tile_id === 0 || !$position || !isset($position['x']) || !isset($position['y'])) {
+							throw new Exception('Invalid input parameters.');
+						}
+
+						echo place_tile($game_id, $tile_id, $position);
+					} else {
+						throw new Exception('Invalid request method.');
+					}
+				} catch (Exception $e) {
+					error_log("Error in place_tile: " . $e->getMessage());
+					echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+				}
+				exit;
 			default:
 				header('HTTP/1.1 400 Bad Request');
 				print json_encode(['errormesg' => "Invalid action: $action."]);
@@ -100,10 +193,8 @@ switch ($endpoint) {
         switch ($b = array_shift($request)) {
             case '':
             case null:
-                handle_players($method, $input);
-                break;
             default:
-                handle_player($method, $b, $input);
+                handle_players($method, $input);
                 break;
         }
         break;
@@ -144,6 +235,32 @@ function handle_board($method, $input) {
             exit;
     }
 }
+function get_tiles($player_id) {
+    global $mysqli;
+
+    $sql = "SELECT ta.attribute_id, ta.color, ta.shape FROM tileattributes ta
+            WHERE ta.attribute_id NOT IN (
+                SELECT attribute_id FROM tiles WHERE status = 'placed'
+            )
+            ORDER BY RAND() LIMIT 6";
+    $result = $mysqli->query($sql);
+
+    if (!$result) {
+        error_log("Failed to fetch tiles: " . $mysqli->error);
+        return json_encode(['success' => false, 'message' => 'Failed to fetch tiles.']);
+    }
+
+    $tiles = [];
+    while ($row = $result->fetch_assoc()) {
+        $tiles[] = $row;
+        $assign_sql = "INSERT INTO tiles (attribute_id, game_id, status) VALUES (?, NULL, 'available')";
+        $stmt = $mysqli->prepare($assign_sql);
+        $stmt->bind_param('i', $row['attribute_id']);
+        $stmt->execute();
+    }
+
+    return json_encode(['success' => true, 'tiles' => $tiles]);
+}
 function handle_tile($method, $x, $y, $input) {
     if ($x === null || $y === null) {
         header('HTTP/1.1 400 Bad Request');
@@ -180,28 +297,16 @@ function handle_players($method, $input) {
         print json_encode(['errormesg' => "Method $method not allowed for players."]);
     }
 }
-/*function handle_player($method, $player, $input) {
-    if ($player === null) {
-        header("HTTP/1.1 400 Bad Request");
-        print json_encode(['errormesg' => "Missing player identifier."]);
-        exit;
-    }
-    switch ($method) {
-        case 'GET':
-            show_player($player);
-            break;
-        case 'PUT':
-            update_player($player, $input);
-            break;
-        default:
-            header("HTTP/1.1 405 Method Not Allowed");
-            print json_encode(['errormesg' => "Method $method not allowed for player."]);
-            exit;
-    }
-}*/
 function handle_status($method) {
     if ($method == 'GET') {
-        show_status();
+        if (!isset($_GET['game_id'])) {
+            header('HTTP/1.1 400 Bad Request');
+            print json_encode(['errormesg' => 'Missing game_id parameter.']);
+            exit;
+        }
+
+        $gameId = intval($_GET['game_id']);
+        show_status($gameId);
     } else {
         header('HTTP/1.1 405 Method Not Allowed');
         print json_encode(['errormesg' => "Method $method not allowed for status."]);
