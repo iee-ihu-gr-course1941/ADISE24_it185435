@@ -3,303 +3,158 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Qwirkle Game</title>
-    <link rel="stylesheet" href="css/bootstrap.min.css">
-    <style>
-        #gameBoard {
-            margin: 20px auto;
-            display: grid;
-            grid-template-columns: repeat(5, 60px);
-            grid-template-rows: repeat(5, 60px);
-            gap: 5px;
-        }
-        #gameBoard div {
-            background-color: #f8f9fa;
-            border: 1px solid #ddd;
-            text-align: center;
-            line-height: 60px;
-            font-weight: bold;
-            cursor: pointer;
-        }
-        #availableTiles {
-            margin: 20px auto;
-            text-align: center;
-        }
-		#tiles img.tile {
-			display: inline-block;
-			border: 2px solid transparent;
-			transition: border-color 0.3s;
-		}
-
-		#tiles img.tile:hover {
-			border-color: blue;
-		}
-
-		#tiles img.tile.selected {
-			border-color: green;
-		}
-    </style>
+    <title>Qwirkler Game</title>
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet">
 </head>
 <body>
-    <div class="container mt-4">
-        <h1 class="text-center">Welcome to Qwirkle</h1>
+    <!-- Header -->
+    <header class="bg-primary text-white text-center py-3">
+        <h1>Qwirkler Game</h1>
+        <p>Create or join a game to start playing!</p>
+    </header>
 
-        <!-- Δημιουργία Παιχνιδιού -->
-        <div class="text-center mt-3">
-            <button id="createGameBtn" class="btn btn-primary">Create Game</button>
-        </div>
+    <!-- Main Content -->
+    <div class="container mt-4" id="pre-game">
+        <div class="row justify-content-center">
+            <!-- Create Game -->
+            <div class="col-md-6 text-center">
+                <h3>Create Game</h3>
+                <form id="create-game-form">
+                    <div class="mb-3">
+                        <label for="player-count" class="form-label">Number of Players</label>
+                        <select class="form-select" id="player-count" required>
+                            <option value="2">2</option>
+                            <option value="3">3</option>
+                            <option value="4">4</option>
+                        </select>
+                    </div>
+                    <button type="submit" class="btn btn-success w-100">Create Game</button>
+                </form>
+            </div>
 
-        <!-- Συμμετοχή σε Παιχνίδι -->
-        <div class="text-center mt-3">
-            <button id="joinGameBtn" class="btn btn-secondary">Join Game</button>
-        </div>
-
-        <!-- Περιοχή Αποτελεσμάτων -->
-        <div id="resultArea" class="mt-4 text-center"></div>
-
-        <!-- Πίνακας Παιχνιδιού -->
-        <div id="gameContainer" class="text-center mt-5" style="display: none;">
-            <h2>Game Board</h2>
-			<div id="gameBoard"></div>
-
-            <!-- Διαθέσιμα Tiles -->
-            <div id="availableTiles" class="mt-4">
-				<h3>Your Tiles</h3>
-				<div id="tiles" class="d-flex justify-content-center"></div>
-			</div>
-			<div id="tiles">
-				<img src="icons/P_R.png" alt="purple rhombus" class="tile mx-2" style="width: 50px; height: 50px; cursor: pointer;" data-tile-id="1" onclick="selectTile(1)">
-				<img src="icons/R_C.png" alt="red circle" class="tile mx-2" style="width: 50px; height: 50px; cursor: pointer;" data-tile-id="2" onclick="selectTile(2)">
-				<!-- Προσθέστε τα υπόλοιπα πλακίδια -->
-			</div>
-			<div class="mt-4">
-				<input type="text" id="tileInput" class="form-control" placeholder="Enter position (e.g., x,y)" />
-			</div>
-
-
-            <!-- Κουμπιά Ελέγχου -->
-            <div id="gameControls" class="d-flex justify-content-center mt-4">
-                <button class="btn btn-success" id="placeBtn">Place</button>
-                <button class="btn btn-warning" id="undoBtn">Undo</button>
-                <button class="btn btn-info" id="swapBtn">Swap</button>
-                <button class="btn btn-danger" id="leaveBtn">Leave</button>
+            <!-- Join Game -->
+            <div class="col-md-6 text-center">
+                <h3>Join Game</h3>
+                <form id="join-game-form">
+                    <div class="mb-3">
+                        <label for="game-id" class="form-label">Game ID</label>
+                        <input type="number" class="form-control" id="game-id" placeholder="Enter Game ID" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="player-name" class="form-label">Your Name</label>
+                        <input type="text" class="form-control" id="player-name" placeholder="Enter Your Name" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100">Join Game</button>
+                </form>
             </div>
         </div>
     </div>
 
-    <script src="js/bootstrap.bundle.min.js"></script>
-    <script>
-        let gameId = null;
-        // Δημιουργία Παιχνιδιού
-        document.getElementById('createGameBtn').addEventListener('click', function () {
-            fetch('http://localhost/MyProject/qwirkler.php/create', {
+    <!-- Game Board Section -->
+    <div class="container mt-4 d-none" id="game-board-section">
+        <div class="row">
+            <!-- Game Board -->
+            <div class="col-md-12">
+                <h2 class="text-center">Game Board</h2>
+                <table class="table table-bordered text-center" id="game-board">
+                    <tbody>
+                        <!-- Dynamic Rows -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="bg-dark text-white text-center py-3 mt-4">
+        <p>Qwirkler Game © 2025</p>
+    </footer>
+	<script>
+    const preGameSection = document.getElementById('pre-game');
+    const gameBoardSection = document.getElementById('game-board-section');
+    const gameBoard = document.getElementById('game-board');
+
+    // Handle Create Game
+    document.getElementById('create-game-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const playerCount = document.getElementById('player-count').value;
+
+        try {
+            const response = await fetch('http://localhost/MyProject/qwirkler.php/create', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ player_count: 2 })
-            })
+                body: JSON.stringify({ player_count: playerCount })
+            });
+
+            const data = await response.json();
+            if (data.status === 'success') {
+                alert(`Game created successfully. Game ID: ${data.data.game_id}`);
+                startGame(data.data.game_id);
+            } else {
+                alert(`Error: ${data.message}`);
+            }
+        } catch (error) {
+            console.error('Unexpected Error:', error);
+            alert('An unexpected error occurred.');
+        }
+    });
+
+    // Handle Join Game
+    document.getElementById('join-game-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const gameId = document.getElementById('game-id').value;
+        const playerName = document.getElementById('player-name').value;
+
+        try {
+            const response = await fetch('http://localhost/MyProject/qwirkler.php/join', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ game_id: gameId, username: playerName })
+            });
+
+            const data = await response.json();
+            if (data.status === 'success') {
+                alert(`Joined game successfully. Game ID: ${gameId}`);
+                startGame(gameId);
+            } else {
+                alert(`Error: ${data.message}`);
+            }
+        } catch (error) {
+            console.error('Unexpected Error:', error);
+            alert('An unexpected error occurred.');
+        }
+    });
+
+    // Start Game
+    function startGame(gameId) {
+        preGameSection.classList.add('d-none');
+        gameBoardSection.classList.remove('d-none');
+
+        // Fetch and render game board
+        fetch(`http://localhost/MyProject/qwirkler.php/board?game_id=${gameId}`)
             .then(response => response.json())
             .then(data => {
-                if (data.success) {
-                    gameId = data.game_id;
-                    document.getElementById('resultArea').innerHTML = `
-                        <div class="alert alert-success">
-                            Game Created! Game ID: ${data.game_id}
-                        </div>`;
-                    loadBoard(gameId);
-                } else {
-                    document.getElementById('resultArea').innerHTML = `
-                        <div class="alert alert-danger">
-                            Error: ${data.message}
-                        </div>`;
+                if (data.status === 'success') {
+                    renderBoard(data.data.board);
                 }
-            })
-            .catch(error => console.error('Error:', error));
-        });
+            });
+    }
 
-        // Φόρτωση Πίνακα
-        function loadBoard(gameId) {
-			console.log('Loading board for Game ID:', gameId);
-			fetch(`http://localhost/MyProject/qwirkler.php/board?game_id=${gameId}`)
-				.then(response => response.json())
-				.then(data => {
-					console.log('Board Data:', data);
-					if (data.board) {
-						const boardDiv = document.getElementById('gameBoard');
-						boardDiv.innerHTML = '';
-						for (let i = 0; i < 5; i++) {
-							for (let j = 0; j < 5; j++) {
-								const cell = document.createElement('div');
-								const tile = data.board[i]?.[j];
-								if (tile) {
-									cell.textContent = `${tile.color} ${tile.shape}`;
-									cell.style.backgroundColor = tile.color;
-									cell.style.border = '1px solid black';
-								} else {
-									cell.textContent = '';
-									cell.style.backgroundColor = 'white';
-								}
-								boardDiv.appendChild(cell);
-							}
-						}
-						// Εμφάνιση της περιοχής του παιχνιδιού
-						document.getElementById('gameContainer').style.display = 'block';
-					} else {
-						console.error('Failed to load board');
-					}
-				})
-				.catch(error => console.error('Error loading board:', error));
-		}
+    // Render Game Board
+    function renderBoard(board) {
+        gameBoard.innerHTML = '';
+        for (const row in board) {
+            const tr = document.createElement('tr');
+            for (const col in board[row]) {
+                const td = document.createElement('td');
+                td.textContent = board[row][col].color || ''; // Χρώμα πλακιδίου
+                tr.appendChild(td);
+            }
+            gameBoard.appendChild(tr);
+        }
+    }
+</script>
 
-
-        // Συμμετοχή σε Παιχνίδι
-		document.getElementById('joinGameBtn').addEventListener('click', function () {
-			const gameId = prompt('Enter the Game ID to join:');
-			if (!gameId) {
-				alert('Game ID is required.');
-				return;
-			}
-
-			fetch('http://localhost/MyProject/qwirkler.php/join', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ game_id: gameId })
-			})
-			.then(response => response.json()) // JSON parsing
-			.then(data => {
-				if (data.success) {
-					console.log('Join successful. Data:', data);
-					alert(`Successfully joined Game ID: ${data.game_id}. Player Count: ${data.player_count}`);
-
-					// Κλήση της loadBoard() με το game_id
-					loadBoard(data.game_id);
-
-					// Εμφάνιση του gameContainer
-					document.getElementById('gameContainer').style.display = 'block';
-				} else {
-					alert(`Error: ${data.message}`);
-				}
-			})
-			.catch(error => console.error('Error:', error));
-		});
-		const colorMap = {
-			red: "R",
-			blue: "BL",
-			green: "BR",
-			yellow: "Y",
-			purple: "P",
-			orange: "O"
-		};
-
-		const shapeMap = {
-			circle: "C",
-			square: "SQ",
-			triangle: "T",
-			star: "S",
-			hexagon: "ST"
-		};
-
-		function loadTiles(playerId) {
-			fetch(`http://localhost/MyProject/qwirkler.php/get_tiles?player_id=${playerId}`)
-				.then(response => response.json())
-				.then(data => {
-					if (data.success) {
-						const tilesDiv = document.getElementById('tiles');
-						tilesDiv.innerHTML = ''; // Καθαρισμός προηγούμενων tiles
-
-						data.tiles.forEach(tile => {
-							const colorCode = colorMap[tile.color];
-							const shapeCode = shapeMap[tile.shape];
-							const imageName = `${colorCode}_${shapeCode}`;
-							const imagePath = `http://localhost/MyProject/lib/icons/${imageName}.png`;
-
-							const tileImage = document.createElement('img');
-							tileImage.src = imagePath;
-							tileImage.alt = `${tile.color} ${tile.shape}`;
-							tileImage.className = 'tile mx-2';
-							tileImage.style.width = '50px';
-							tileImage.style.height = '50px';
-							tileImage.style.cursor = 'pointer';
-
-							tileImage.onclick = () => selectTile(tile.tile_id);
-
-							tilesDiv.appendChild(tileImage);
-						});
-					} else {
-						alert(data.message || 'Failed to load tiles.');
-					}
-				})
-				.catch(error => console.error('Error loading tiles:', error));
-		}
-		let selectedTile = null;
-		function selectTile(tileId) {
-			if (!tileId) {
-				alert('Tile ID is invalid.');
-				return;
-			}
-			// Αποθήκευση του επιλεγμένου tile ID
-			selectedTile = tileId;
-
-			// Καθαρισμός προηγούμενης επιλογής
-			document.querySelectorAll('#tiles img.tile').forEach(tile => {
-				tile.classList.remove('selected'); // Αφαίρεση της κλάσης "selected" από όλα τα πλακίδια
-			});
-
-			// Επισήμανση του επιλεγμένου tile
-			const selectedTileImage = document.querySelector(`#tiles img[data-tile-id="${tileId}"]`);
-			if (selectedTileImage) {
-				selectedTileImage.classList.add('selected'); // Προσθήκη της κλάσης "selected" στο επιλεγμένο πλακίδιο
-			}
-
-			console.log(`Selected Tile ID: ${tileId}`);
-		}
-
-        // Κουμπιά Ελέγχου
-        document.getElementById('placeBtn').addEventListener('click', function () {
-			const moveInput = document.getElementById('tileInput').value; // Ανάγνωση από το input
-			const [x, y] = moveInput.split(',').map(Number); // Διαχωρισμός συντεταγμένων
-
-			if (isNaN(x) || isNaN(y)) {
-				alert('Invalid input format. Use: x,y');
-				return;
-			}
-
-			if (!selectedTile) {
-				alert('No tile selected.');
-				return;
-			}
-
-			fetch('http://localhost/MyProject/qwirkler.php/actions/place_tile', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					game_id: 32,
-					tile: selectedTile,
-					position: { x: 1, y: 2 }
-				})
-			})
-			.then(response => response.json())
-			.then(data => {
-				if (data.success) {
-					alert('Tile placed successfully!');
-					loadBoard(gameId); // Ενημέρωση του πίνακα
-				} else {
-					alert(`Error: ${data.message}`);
-				}
-			})
-			.catch(error => console.error('Error:', error));
-		});
-
-
-
-        document.getElementById('undoBtn').addEventListener('click', function () {
-            alert('Undo action triggered!');
-        });
-        document.getElementById('swapBtn').addEventListener('click', function () {
-            alert('Swap action triggered!');
-        });
-        document.getElementById('leaveBtn').addEventListener('click', function () {
-            alert('Leave action triggered!');
-        });
-    </script>
 </body>
 </html>

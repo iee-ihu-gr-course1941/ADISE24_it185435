@@ -1,21 +1,58 @@
 <?php
-
-function create_game() {
+function create_game($player_count) {
     global $mysqli;
-    $sql = "INSERT INTO games (status) VALUES ('initialized')";
+
+    $sql = "INSERT INTO games (status, player_count) VALUES ('initialized', ?)";
     $stmt = $mysqli->prepare($sql);
+    $stmt->bind_param('i', $player_count);
 
-    if (!$stmt) {
-        error_log("Prepare failed: " . $mysqli->error);
-        return false;
-    }
-    if (!$stmt->execute()) {
-        error_log("Execute failed: " . $stmt->error);
-        return false;
+    if ($stmt->execute()) {
+        return $stmt->insert_id;
     }
 
-    return $stmt->insert_id; 
+    return false;
 }
+function create_players_for_game($game_id, $player_count) {
+    global $mysqli;
+
+    $players = [];
+    for ($i = 1; $i <= $player_count; $i++) {
+        $username = "Player_" . uniqid();
+        $email = $username . "@example.com";
+
+        // Δημιουργία παίκτη
+        $sql_insert_player = "INSERT INTO players (username, email) VALUES (?, ?)";
+        $stmt_insert_player = $mysqli->prepare($sql_insert_player);
+        $stmt_insert_player->bind_param('ss', $username, $email);
+
+        if (!$stmt_insert_player->execute()) {
+            return false;
+        }
+
+        $player_id = $stmt_insert_player->insert_id;
+
+        // Προσθήκη παίκτη στον πίνακα game_players
+        $turn_order = $i;
+        $sql_insert_game_player = "
+            INSERT INTO game_players (game_id, player_id, turn_order) 
+            VALUES (?, ?, ?)";
+        $stmt_insert_game_player = $mysqli->prepare($sql_insert_game_player);
+        $stmt_insert_game_player->bind_param('iii', $game_id, $player_id, $turn_order);
+
+        if (!$stmt_insert_game_player->execute()) {
+            return false;
+        }
+
+        $players[] = [
+            'player_id' => $player_id,
+            'username' => $username,
+            'turn_order' => $turn_order
+        ];
+    }
+
+    return $players;
+}
+
 function join_game($game_id) {
     global $mysqli;
 
@@ -48,9 +85,10 @@ function join_game($game_id) {
         'message' => 'Game not found or already active.',
     ];
 }
-function add_player_to_game($game_id) {
+function add_player_to_game($game_id, $player_id) {
     global $mysqli;
 
+    // Έλεγχος αν το παιχνίδι υπάρχει και είναι έγκυρο
     $sql_check_game = "SELECT player_count, status FROM games WHERE game_id = ?";
     $stmt_check_game = $mysqli->prepare($sql_check_game);
     $stmt_check_game->bind_param("i", $game_id);
@@ -68,27 +106,71 @@ function add_player_to_game($game_id) {
         return ['success' => false, 'message' => 'Game has already reached the maximum number of players.'];
     }
 
-    // Ενημέρωση του player_count
+    // Ενημέρωση του πίνακα `game_players`
+    $turn_order = $game_data['player_count'] + 1;
+    $sql_add_game_player = "INSERT INTO game_players (game_id, player_id, turn_order) VALUES (?, ?, ?)";
+    $stmt_add_game_player = $mysqli->prepare($sql_add_game_player);
+    $stmt_add_game_player->bind_param("iii", $game_id, $player_id, $turn_order);
+
+    if (!$stmt_add_game_player->execute()) {
+        return ['success' => false, 'message' => 'Failed to add player to game.'];
+    }
+
+    // Ενημέρωση του αριθμού παικτών
     $new_player_count = $game_data['player_count'] + 1;
     $sql_update_count = "UPDATE games SET player_count = ? WHERE game_id = ?";
     $stmt_update_count = $mysqli->prepare($sql_update_count);
     $stmt_update_count->bind_param("ii", $new_player_count, $game_id);
-    $stmt_update_count->execute();
 
-    // Ενημέρωση του status σε 'active' αν οι παίκτες είναι >= 2
+    if (!$stmt_update_count->execute()) {
+        return ['success' => false, 'message' => 'Failed to update player count.'];
+    }
+
+    // Ενημέρωση του `status` σε `active` αν οι παίκτες είναι 2 ή περισσότεροι
     if ($new_player_count >= 2 && $game_data['status'] === 'initialized') {
         $sql_update_status = "UPDATE games SET status = 'active' WHERE game_id = ?";
         $stmt_update_status = $mysqli->prepare($sql_update_status);
         $stmt_update_status->bind_param("i", $game_id);
-        $stmt_update_status->execute();
+
+        if (!$stmt_update_status->execute()) {
+            return ['success' => false, 'message' => 'Failed to update game status to active.'];
+        }
     }
 
     return [
         'success' => true,
-        'player_id' => $mysqli->insert_id, // Αν υπάρχει πίνακας players και γίνεται εισαγωγή
         'player_count' => $new_player_count
     ];
 }
+
+function add_or_get_player($username, $email) {
+    global $mysqli;
+
+    // Έλεγχος αν υπάρχει ήδη ο παίκτης
+    $sql_check = "SELECT player_id FROM players WHERE username = ? OR email = ?";
+    $stmt_check = $mysqli->prepare($sql_check);
+    $stmt_check->bind_param('ss', $username, $email);
+    $stmt_check->execute();
+    $result = $stmt_check->get_result();
+
+    if ($result->num_rows > 0) {
+        $row = $result->fetch_assoc();
+        return $row['player_id']; // Επιστροφή του player_id
+    }
+
+    // Δημιουργία νέου παίκτη
+    $sql_insert = "INSERT INTO players (username, email) VALUES (?, ?)";
+    $stmt_insert = $mysqli->prepare($sql_insert);
+    $stmt_insert->bind_param('ss', $username, $email);
+
+    if (!$stmt_insert->execute()) {
+        return false;
+    }
+
+    return $stmt_insert->insert_id; // Επιστροφή του νέου player_id
+}
+
+
 function generate_board($game_id) {
     $board = [];
     for ($i = 0; $i < 5; $i++) {
@@ -100,216 +182,182 @@ function generate_board($game_id) {
     }
     return $board;
 }
-function place_tile($game_id, $tile_id, $position) {
+
+function swap_tiles($game_id, $tiles) {
     global $mysqli;
 
-    try {
-        // Επικύρωση αν το πλακίδιο ανήκει στο παιχνίδι και είναι διαθέσιμο
-        $sql_validate_tile = "
-            SELECT *
-            FROM tiles
-            WHERE tile_id = ? AND game_id = ? AND status = 'available'";
-        $stmt_validate_tile = $mysqli->prepare($sql_validate_tile);
-        $stmt_validate_tile->bind_param('ii', $tile_id, $game_id);
-        $stmt_validate_tile->execute();
-        $result_validate_tile = $stmt_validate_tile->get_result();
+    // Επιστροφή των πλακιδίων στον "σάκο"
+    $sql_return_tiles = "
+        UPDATE tiles 
+        SET status = 'available', row = NULL, col = NULL 
+        WHERE game_id = ? AND tile_id IN (" . implode(',', $tiles) . ")";
+    $stmt_return_tiles = $mysqli->prepare($sql_return_tiles);
+    $stmt_return_tiles->bind_param("i", $game_id);
 
-        if ($result_validate_tile->num_rows === 0) {
-            throw new Exception('Tile is not available or does not belong to this game.');
-        }
+    if (!$stmt_return_tiles->execute()) {
+        response_json(500, 'Failed to return tiles: ' . $stmt_return_tiles->error);
+        return;
+    }
 
-        // Επικύρωση αν η θέση είναι ήδη κατειλημμένη
-        $sql_check_position = "
-            SELECT *
-            FROM board
-            WHERE x = ? AND y = ? AND game_id = ?";
-        $stmt_check_position = $mysqli->prepare($sql_check_position);
-        $stmt_check_position->bind_param('iii', $position['x'], $position['y'], $game_id);
-        $stmt_check_position->execute();
-        $result_check_position = $stmt_check_position->get_result();
+    // Ανάκτηση νέων πλακιδίων από τον "σάκο"
+    $sql_get_new_tiles = "
+        SELECT tile_id, attribute_id 
+        FROM tiles 
+        WHERE game_id = ? AND status = 'available' 
+        LIMIT ?";
+    $stmt_get_new_tiles = $mysqli->prepare($sql_get_new_tiles);
+    $limit = count($tiles); // Αριθμός πλακιδίων που ζητήθηκαν
+    $stmt_get_new_tiles->bind_param("ii", $game_id, $limit);
+    $stmt_get_new_tiles->execute();
+    $result_new_tiles = $stmt_get_new_tiles->get_result();
 
-        if ($result_check_position->num_rows > 0) {
-            throw new Exception('Position is already occupied.');
-        }
+    $new_tiles = [];
+    while ($row = $result_new_tiles->fetch_assoc()) {
+        $new_tiles[] = $row;
+    }
 
-        // Τοποθέτηση πλακιδίου στον πίνακα
-        $sql_place_tile = "
-            INSERT INTO board (x, y, tile_id, game_id, status)
-            VALUES (?, ?, ?, ?, 'placed')";
-        $stmt_place_tile = $mysqli->prepare($sql_place_tile);
-        $stmt_place_tile->bind_param('iiii', $position['x'], $position['y'], $tile_id, $game_id);
+    // Έλεγχος αν υπάρχουν αρκετά διαθέσιμα πλακίδια
+    if (count($new_tiles) < $limit) {
+        response_json(400, 'Not enough available tiles in the sack.');
+        return;
+    }
 
-        if (!$stmt_place_tile->execute()) {
-            throw new Exception('Failed to place the tile on the board.');
-        }
-
-        // Ενημέρωση της κατάστασης του πλακιδίου στον πίνακα tiles
-        $sql_update_tile_status = "
-            UPDATE tiles
-            SET status = 'placed'
+    // Ενημέρωση των νέων πλακιδίων ως ανατεθειμένα
+    foreach ($new_tiles as $tile) {
+        $sql_assign_tile = "
+            UPDATE tiles 
+            SET status = 'assigned' 
             WHERE tile_id = ?";
-        $stmt_update_tile_status = $mysqli->prepare($sql_update_tile_status);
-        $stmt_update_tile_status->bind_param('i', $tile_id);
+        $stmt_assign_tile = $mysqli->prepare($sql_assign_tile);
+        $stmt_assign_tile->bind_param("i", $tile['tile_id']);
 
-        if (!$stmt_update_tile_status->execute()) {
-            throw new Exception('Failed to update tile status.');
+        if (!$stmt_assign_tile->execute()) {
+            response_json(500, 'Failed to assign new tile: ' . $stmt_assign_tile->error);
+            return;
         }
-
-        // Επιτυχής τοποθέτηση
-        return json_encode(['success' => true, 'message' => 'Tile placed successfully.']);
-    } catch (Exception $e) {
-        // Διαχείριση σφαλμάτων
-        return json_encode(['success' => false, 'message' => $e->getMessage()]);
     }
+
+    response_json(200, 'Tiles swapped successfully.', ['new_tiles' => $new_tiles]);
 }
 
-function swap_tiles($game_id, $player_id, $tiles) {
-    global $mysqli;
-
-    if (is_string($tiles)) {
-        $tiles = json_decode($tiles, true);
-        if (!is_array($tiles)) {
-            header('HTTP/1.1 400 Bad Request');
-            print json_encode(['errormesg' => 'Invalid tiles parameter. Must be an array.']);
-            exit;
-        }
-    }
-    try {
-        $mysqli->begin_transaction();
-
-        $stmt = $mysqli->prepare("DELETE FROM tiles WHERE tile_id = ? AND game_id = ? AND status = 'available'");
-        foreach ($tiles as $tile) {
-            $stmt->bind_param('ii', $tile, $game_id);
-            $stmt->execute();
-        }
-
-        $stmt = $mysqli->prepare("
-            INSERT INTO game_history (game_id, player_id, action_id, turn_number) 
-            VALUES (?, ?, 
-                (SELECT action_id FROM actions WHERE action_name = 'swap'), 
-                (SELECT COALESCE(MAX(turn_number), 0) + 1 FROM (SELECT * FROM game_history WHERE game_id = ?) AS subquery)
-            )
-        ");
-        $stmt->bind_param('iii', $game_id, $player_id, $game_id);
-        $stmt->execute();
-
-        $mysqli->commit();
-        header('Content-Type: application/json');
-        print json_encode(['status' => 'success', 'message' => 'Tiles swapped.']);
-    } catch (Exception $e) {
-        $mysqli->rollback();
-        header('HTTP/1.1 500 Internal Server Error');
-        print json_encode(['errormesg' => $e->getMessage()]);
-    }
-}
 function undo_action($game_id, $player_id) {
     global $mysqli;
 
-    try {
-        $mysqli->begin_transaction();
+    // Αναίρεση των ενεργειών από τον πίνακα board
+    $sql_undo = "DELETE FROM board WHERE game_id = ? AND player_id = ? AND status = 'placed'";
+    $stmt = $mysqli->prepare($sql_undo);
+    $stmt->bind_param("ii", $game_id, $player_id);
 
-        $stmt = $mysqli->prepare("SELECT history_id, action_id, tile_id FROM game_history WHERE game_id = ? AND player_id = ? ORDER BY turn_number DESC LIMIT 1");
-        $stmt->bind_param('ii', $game_id, $player_id);
-        $stmt->execute();
-        $result = $stmt->get_result();
-        $lastAction = $result->fetch_assoc();
-
-        if (!$lastAction) {
-            throw new Exception('No actions found to undo.');
-        }
-
-        $stmt = $mysqli->prepare("SELECT action_id FROM actions WHERE action_name = 'place'");
-        $stmt->execute();
-        $result = $stmt->get_result();
-        $placeAction = $result->fetch_assoc();
-
-        if ($lastAction['action_id'] == $placeAction['action_id']) {
-            $stmt = $mysqli->prepare("UPDATE tiles SET status = 'available', row = NULL, col = NULL WHERE tile_id = ?");
-            $stmt->bind_param('i', $lastAction['tile_id']);
-            $stmt->execute();
-        }
-
-        $stmt = $mysqli->prepare("DELETE FROM game_history WHERE history_id = ?");
-        $stmt->bind_param('i', $lastAction['history_id']);
-        $stmt->execute();
-
-        $mysqli->commit();
-        header('Content-Type: application/json');
-        print json_encode(['status' => 'success', 'message' => 'Last action undone.']);
-    } catch (Exception $e) {
-        $mysqli->rollback();
-        header('HTTP/1.1 500 Internal Server Error');
-        print json_encode(['errormesg' => $e->getMessage()]);
+    if (!$stmt->execute()) {
+        response_json(500, 'Failed to undo action: ' . $stmt->error);
+        return;
     }
+
+    response_json(200, 'Last action undone successfully.');
 }
+
 function end_turn($game_id, $player_id) {
     global $mysqli;
 
-    try {
-        $mysqli->begin_transaction();
+    // Ενημέρωση της σειράς γύρων
+    $sql_end_turn = "
+        UPDATE game_players 
+        SET is_active = 0 
+        WHERE game_id = ? AND player_id = ?";
+    $stmt = $mysqli->prepare($sql_end_turn);
+    $stmt->bind_param("ii", $game_id, $player_id);
 
-        $stmt = $mysqli->prepare("
-            UPDATE gamestate 
-            SET current_turn_player_id = (
-                SELECT player_id 
-                FROM game_players 
-                WHERE game_id = ? 
-                AND turn_order = (
-                    (SELECT turn_order FROM game_players WHERE game_id = ? AND player_id = ?) % 
-                    (SELECT COUNT(*) FROM game_players WHERE game_id = ?)
-                ) + 1
-            ) 
-            WHERE game_id = ?
-        ");
-        $stmt->bind_param('iiiii', $game_id, $game_id, $player_id, $game_id, $game_id);
-        $stmt->execute();
-
-        $stmt = $mysqli->prepare("
-            INSERT INTO game_history (game_id, player_id, action_id, turn_number) 
-            VALUES (?, ?, 
-                (SELECT action_id FROM actions WHERE action_name = 'end_turn'), 
-                (SELECT COALESCE(MAX(turn_number), 0) + 1 FROM (SELECT * FROM game_history WHERE game_id = ?) AS subquery)
-            )
-        ");
-        $stmt->bind_param('iii', $game_id, $player_id, $game_id);
-        $stmt->execute();
-
-        $mysqli->commit();
-        header('Content-Type: application/json');
-        print json_encode(['status' => 'success', 'message' => 'Turn ended.']);
-    } catch (Exception $e) {
-        $mysqli->rollback();
-        header('HTTP/1.1 500 Internal Server Error');
-        print json_encode(['errormesg' => $e->getMessage()]);
+    if (!$stmt->execute()) {
+        response_json(500, 'Failed to end turn: ' . $stmt->error);
+        return;
     }
+
+    // Ενεργοποίηση του επόμενου παίκτη
+    $sql_next_player = "
+        UPDATE game_players 
+        SET is_active = 1 
+        WHERE game_id = ? AND turn_order = (
+            SELECT MIN(turn_order) 
+            FROM game_players 
+            WHERE game_id = ? AND is_active = 0
+        )";
+    $stmt_next = $mysqli->prepare($sql_next_player);
+    $stmt_next->bind_param("ii", $game_id, $game_id);
+
+    if (!$stmt_next->execute()) {
+        response_json(500, 'Failed to set next player: ' . $stmt_next->error);
+        return;
+    }
+
+    response_json(200, 'Turn ended successfully.');
 }
+
 function leave_game($game_id, $player_id) {
     global $mysqli;
 
-    try {
-        $mysqli->begin_transaction();
+    // Διαγραφή του παίκτη από το παιχνίδι
+    $sql_leave = "DELETE FROM game_players WHERE game_id = ? AND player_id = ?";
+    $stmt = $mysqli->prepare($sql_leave);
+    $stmt->bind_param("ii", $game_id, $player_id);
 
-        $stmt = $mysqli->prepare("UPDATE game_players SET is_active = 0 WHERE game_id = ? AND player_id = ?");
-        $stmt->bind_param('ii', $game_id, $player_id);
-        $stmt->execute();
-
-        $stmt = $mysqli->prepare("
-            INSERT INTO game_history (game_id, player_id, action_id, turn_number) 
-            VALUES (?, ?, 
-                (SELECT action_id FROM actions WHERE action_name = 'leave'), 
-                (SELECT COALESCE(MAX(turn_number), 0) + 1 FROM (SELECT * FROM game_history WHERE game_id = ?) AS subquery)
-            )
-        ");
-        $stmt->bind_param('iii', $game_id, $player_id, $game_id);
-        $stmt->execute();
-
-        $mysqli->commit();
-        header('Content-Type: application/json');
-        print json_encode(['status' => 'success', 'message' => 'Player left the game.']);
-    } catch (Exception $e) {
-        $mysqli->rollback();
-        header('HTTP/1.1 500 Internal Server Error');
-        print json_encode(['errormesg' => $e->getMessage()]);
+    if (!$stmt->execute()) {
+        response_json(500, 'Failed to leave game: ' . $stmt->error);
+        return;
     }
+
+    // Ενημέρωση του αριθμού παικτών
+    $sql_update_count = "UPDATE games SET player_count = player_count - 1 WHERE game_id = ?";
+    $stmt_update = $mysqli->prepare($sql_update_count);
+    $stmt_update->bind_param("i", $game_id);
+
+    if (!$stmt_update->execute()) {
+        response_json(500, 'Failed to update player count: ' . $stmt_update->error);
+        return;
+    }
+
+    response_json(200, 'Player left the game successfully.');
+}
+
+
+function update_game_status($game_id) {
+    global $mysqli;
+
+    // Ανάκτηση παικτών από τη στήλη `players`
+    $sql = "SELECT players FROM games WHERE game_id = ?";
+    $stmt = $mysqli->prepare($sql);
+    $stmt->bind_param('i', $game_id);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $row = $result->fetch_assoc();
+
+    $players = json_decode($row['players'], true) ?? [];
+
+    // Ενημέρωση σε active αν υπάρχουν τουλάχιστον 2 παίκτες
+    if (count($players) >= 2) {
+        $sql_update = "UPDATE games SET status = 'active' WHERE game_id = ? AND status = 'initialized'";
+        $stmt_update = $mysqli->prepare($sql_update);
+        $stmt_update->bind_param('i', $game_id);
+        $stmt_update->execute();
+    }
+}
+
+function get_players_for_game($game_id) {
+    global $mysqli;
+
+    $sql = "SELECT p.player_id, p.username, gp.turn_order, gp.score
+            FROM players p
+            JOIN game_players gp ON p.player_id = gp.player_id
+            WHERE gp.game_id = ?";
+    $stmt = $mysqli->prepare($sql);
+    $stmt->bind_param('i', $game_id);
+    $stmt->execute();
+    $result = $stmt->get_result();
+
+    $players = [];
+    while ($row = $result->fetch_assoc()) {
+        $players[] = $row;
+    }
+
+    return $players;
 }
 ?>

@@ -1,4 +1,19 @@
 <?php
+
+function response_json($status, $message, $data = null) {
+    http_response_code($status);
+    $response = [
+        'status' => $status === 200 ? 'success' : 'error',
+        'message' => $message
+    ];
+
+    if ($data !== null) {
+        $response['data'] = $data;
+    }
+
+    echo json_encode($response);
+    exit;
+}
 function get_game_id($method) {
     $game_id = ($method === 'GET') ? $_GET['game_id'] ?? null : $_POST['game_id'] ?? null;
 

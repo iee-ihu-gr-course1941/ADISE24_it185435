@@ -9,7 +9,11 @@ require_once "lib/board.php";
 require_once "lib/actions.php";
 require_once "lib/players.php";
 require_once "lib/status.php";
+require_once "lib/helpers.php";
 
+header('Content-Type: application/json');
+
+// Επεξεργασία διαδρομής
 $request_path = $_SERVER['PATH_INFO'] ?? null;
 
 if (!$request_path) {
@@ -20,7 +24,7 @@ if (!$request_path) {
 $request = explode('/', trim($request_path, '/'));
 $method = $_SERVER['REQUEST_METHOD'];
 
-// Συνένωση παραμέτρων από JSON και $_GET
+// Συνδυασμός παραμέτρων από JSON και GET
 $input = json_decode(file_get_contents('php://input'), true) ?? [];
 $input = array_merge($input, $_GET);
 
@@ -29,287 +33,251 @@ if (isset($_SERVER['HTTP_X_TOKEN'])) {
 } else {
     $input['token'] = '';
 }
-// Ασφαλής λήψη του endpoint
-$endpoint = $request[0] ?? null;
-array_shift($request); // Αφαιρεί το πρώτο στοιχείο από το $request
 
+$endpoint = $request[0] ?? null;
+array_shift($request);
 
 switch ($endpoint) {
     case 'board':
-        switch ($b = array_shift($request)) {
+        switch ($b = array_shift($request)) {	
             case '':
             case null:
                 handle_board($method, $input);
                 break;
-            case 'tile':
-                handle_tile($method, $request[0] ?? null, $request[1] ?? null, $input);
-                break;
+			case 'tile':
+				handle_tile($method, $input);
+				break;
             default:
-                header("HTTP/1.1 404 Not Found");
-                exit;
+                response_json(404, 'Endpoint not found');
         }
         break;
 	case 'create':
 		if ($method === 'POST') {
-			require_once "lib/actions.php";
 			$player_count = $input['player_count'] ?? 2;
+
 			if ($player_count < 2 || $player_count > 4) {
-				echo json_encode(['success' => false, 'message' => 'Player count must be between 2 and 4.']);
-				exit;
+				response_json(400, 'Player count must be between 2 and 4.');
+				return;
 			}
+
 			$game_id = create_game($player_count);
-			if ($game_id) {
-				echo json_encode(['success' => true, 'game_id' => $game_id]);
-			} else {
-				echo json_encode(['success' => false, 'message' => 'Failed to create game.']);
+
+			if (!$game_id) {
+				response_json(500, 'Failed to create game.');
+				return;
 			}
+
+			$players = create_players_for_game($game_id, $player_count);
+
+			if (!$players) {
+				response_json(500, 'Failed to create players.');
+				return;
+			}
+
+			response_json(200, 'Game created successfully.', [
+				'game_id' => $game_id,
+				'players' => $players
+			]);
+		} else {
+			response_json(405, 'Method not allowed.');
 		}
 		break;
 	case 'join':
 		if ($method === 'POST') {
 			$game_id = intval($input['game_id'] ?? 0);
 
-			// Έλεγχος αν το Game ID δόθηκε
 			if (!$game_id) {
-				echo json_encode(['success' => false, 'message' => 'Game ID is required.']);
-				exit;
+				response_json(400, 'Game ID is required.');
+				return;
 			}
 
-			// Προσπάθεια προσθήκης παίκτη στο παιχνίδι
-			$result = add_player_to_game($game_id);
+			// Δημιουργία ή προσθήκη παίκτη στο παιχνίδι
+			$username = $input['username'] ?? 'Guest_' . uniqid();
+			$email = $input['email'] ?? $username . '@example.com';
+			$player_id = add_or_get_player($username, $email);
 
-			// Έλεγχος αν η συνάρτηση επέστρεψε επιτυχία
+			if (!$player_id) {
+				response_json(500, 'Failed to create or retrieve player.');
+				return;
+			}
+
+			$result = add_player_to_game($game_id, $player_id);
+
 			if (!$result['success']) {
-				echo json_encode(['success' => false, 'message' => $result['message']]);
-				exit;
+				response_json(400, $result['message']);
+				return;
 			}
 
-			// Ανάκτηση δεδομένων από το αποτέλεσμα
-			$player_id = $result['player_id'] ?? null;
-			$player_count = $result['player_count'] ?? null;
-
-			// Έλεγχος για έγκυρα δεδομένα παίκτη
-			if ($player_id === null || $player_count === null) {
-				echo json_encode(['success' => false, 'message' => 'Failed to retrieve player information.']);
-				exit;
-			}
-
-			// Επιστροφή επιτυχούς απάντησης
-			echo json_encode([
-				'success' => true,
+			response_json(200, 'Player joined the game successfully.', [
 				'game_id' => $game_id,
 				'player_id' => $player_id,
-				'player_count' => $player_count
+				'player_count' => $result['player_count']
 			]);
-			exit;
-	}
+		} else {
+			response_json(405, 'Method not allowed.');
+		}
 		break;
-
     case 'actions':
 		$action = $input['action'] ?? null;
 
 		if (!$action) {
-			header('HTTP/1.1 400 Bad Request');
-			print json_encode(['errormesg' => 'Missing action parameter.']);
-			exit;
+			response_json(400, 'Missing action parameter.');
+			return;
 		}
 		switch ($action) {
 			case 'swap':
-				if (!isset($input['tiles'], $input['game_id'], $input['player_id'])) {
-					header('HTTP/1.1 400 Bad Request');
-					print json_encode(['errormesg' => 'Missing required parameters: game_id, player_id, tiles.']);
-					exit;
+				if (!isset($input['tiles'], $input['game_id'])) {
+					response_json(400, 'Missing required parameters: game_id, tiles.');
+					return;
 				}
-				swap_tiles($input['game_id'], $input['player_id'], $input['tiles']);
+				swap_tiles($input['game_id'], $input['tiles']);
 				break;
 
 			case 'undo':
 				if (!isset($input['game_id'], $input['player_id'])) {
-					header('HTTP/1.1 400 Bad Request');
-					print json_encode(['errormesg' => 'Missing required parameters: game_id, player_id.']);
-					exit;
+					response_json(400, 'Missing required parameters: game_id, player_id.');
+					return;
 				}
 				undo_action($input['game_id'], $input['player_id']);
 				break;
 
 			case 'end_turn':
 				if (!isset($input['game_id'], $input['player_id'])) {
-					header('HTTP/1.1 400 Bad Request');
-					print json_encode(['errormesg' => 'Missing required parameters: game_id, player_id.']);
-					exit;
+					response_json(400, 'Missing required parameters: game_id, player_id.');
+					return;
 				}
 				end_turn($input['game_id'], $input['player_id']);
 				break;
 
 			case 'leave_game':
 				if (!isset($input['game_id'], $input['player_id'])) {
-					header('HTTP/1.1 400 Bad Request');
-					print json_encode(['errormesg' => 'Missing required parameters: game_id, player_id.']);
-					exit;
+					response_json(400, 'Missing required parameters: game_id, player_id.');
+					return;
 				}
 				leave_game($input['game_id'], $input['player_id']);
 				break;
-			case 'get_tiles':
-				if ($method === 'GET') {
-					$player_id = intval($input['player_id'] ?? 0);
-					if ($player_id === 0) {
-						echo json_encode(['success' => false, 'message' => 'Player ID is required.']);
-						exit;
-					}
-					echo get_tiles($player_id);
-				} else {
-					echo json_encode(['success' => false, 'message' => 'Invalid request method.']);
-				}
-				break;
-			case 'place_tile':
-				header('Content-Type: application/json');
-				try {
-					if ($method === 'POST') {
-						error_log("Input: " . json_encode($input));
-						$game_id = intval($input['game_id'] ?? 0);
-						$tile_id = intval($input['tile'] ?? 0);
-						$position = $input['position'] ?? null;
 
-						if ($game_id === 0 || $tile_id === 0 || !$position || !isset($position['x']) || !isset($position['y'])) {
-							throw new Exception('Invalid input parameters.');
-						}
-
-						echo place_tile($game_id, $tile_id, $position);
-					} else {
-						throw new Exception('Invalid request method.');
-					}
-				} catch (Exception $e) {
-					error_log("Error in place_tile: " . $e->getMessage());
-					echo json_encode(['success' => false, 'message' => $e->getMessage()]);
-				}
-				exit;
 			default:
-				header('HTTP/1.1 400 Bad Request');
-				print json_encode(['errormesg' => "Invalid action: $action."]);
-				exit;
+				response_json(400, "Invalid action: $action.");
+				return;
 		}
 		break;
     case 'players':
-        switch ($b = array_shift($request)) {
-            case '':
-            case null:
-            default:
-                handle_players($method, $input);
-                break;
-        }
-        break;
-    case 'status':
-        if (empty($request)) {
-            handle_status($method);
-        } else {
-            header("HTTP/1.1 404 Not Found");
-            exit;
-        }
-        break;
+		switch ($b = array_shift($request)) {
+			case '':
+			case null:
+				handle_players($method, $input);
+				break;
 
+			case 'stats':
+				if ($method === 'GET') {
+					$player_id = intval($input['player_id'] ?? 0);
+					show_player_stats($player_id);
+				} else {
+					response_json(405, 'Method not allowed.');
+				}
+				break;
+
+			default:
+				response_json(400, "Invalid endpoint for players: $b.");
+				break;
+		}
+		break;
     default:
         header("HTTP/1.1 404 Not Found");
         exit;
 }
-
 function handle_board($method, $input) {
-    if (!isset($input['game_id'])) {
-        header('HTTP/1.1 400 Bad Request');
-        print json_encode(['errormesg' => 'Missing game_id parameter.']);
-        exit;
-    }
+    $game_id = $input['game_id'] ?? null;
 
-    $gameId = intval($input['game_id']);
+    if (!$game_id) {
+        response_json(400, 'Missing game_id parameter');
+        return;
+    }
 
     switch ($method) {
         case 'GET':
-            show_board($gameId); // Περνά το $gameId
+            show_board($game_id);
             break;
+
         case 'POST':
-            reset_board($gameId);
-            show_board($gameId);
+            reset_board($game_id);
             break;
+
         default:
-            header('HTTP/1.1 405 Method Not Allowed');
-            print json_encode(['errormesg' => "Method $method not allowed for resource board."]);
-            exit;
+            response_json(405, 'Method not allowed');
     }
 }
-function get_tiles($player_id) {
+function handle_tile($method, $input) {
+    if ($method !== 'POST') {
+        response_json(405, 'Method not allowed');
+        return;
+    }
+
+    $game_id = $input['game_id'] ?? null;
+    $row = $input['row'] ?? null;
+    $col = $input['col'] ?? null;
+    $attribute_id = $input['attribute_id'] ?? null;
+
+    if (!$game_id || !$row || !$col || !$attribute_id) {
+        response_json(400, 'Missing parameters: game_id, row, col, or attribute_id');
+        return;
+    }
+
+    place_tile($game_id, $attribute_id, $row, $col);
+}
+function get_tiles($game_id, $player_id) {
     global $mysqli;
 
-    $sql = "SELECT ta.attribute_id, ta.color, ta.shape FROM tileattributes ta
-            WHERE ta.attribute_id NOT IN (
-                SELECT attribute_id FROM tiles WHERE status = 'placed'
-            )
-            ORDER BY RAND() LIMIT 6";
-    $result = $mysqli->query($sql);
-
-    if (!$result) {
-        error_log("Failed to fetch tiles: " . $mysqli->error);
-        return json_encode(['success' => false, 'message' => 'Failed to fetch tiles.']);
-    }
+    // Ανάκτηση 6 τυχαίων πλακιδίων από το sack
+    $sql = "
+        SELECT tile_id, attribute_id 
+        FROM tiles 
+        WHERE game_id = ? AND status = 'available' 
+        ORDER BY RAND() 
+        LIMIT 6";
+    $stmt = $mysqli->prepare($sql);
+    $stmt->bind_param('i', $game_id);
+    $stmt->execute();
+    $result = $stmt->get_result();
 
     $tiles = [];
     while ($row = $result->fetch_assoc()) {
         $tiles[] = $row;
-        $assign_sql = "INSERT INTO tiles (attribute_id, game_id, status) VALUES (?, NULL, 'available')";
-        $stmt = $mysqli->prepare($assign_sql);
-        $stmt->bind_param('i', $row['attribute_id']);
-        $stmt->execute();
+
+        // Ενημέρωση των πλακιδίων ως ανατεθειμένα στον παίκτη
+        $sql_assign_tile = "
+            UPDATE tiles 
+            SET status = 'assigned', row = NULL, col = NULL 
+            WHERE tile_id = ?";
+        $stmt_assign_tile = $mysqli->prepare($sql_assign_tile);
+        $stmt_assign_tile->bind_param('i', $row['tile_id']);
+        $stmt_assign_tile->execute();
     }
 
-    return json_encode(['success' => true, 'tiles' => $tiles]);
+    if (count($tiles) < 6) {
+        response_json(400, 'Not enough tiles available in the sack.');
+        return;
+    }
+
+    response_json(200, 'Tiles assigned successfully.', ['tiles' => $tiles]);
 }
-function handle_tile($method, $x, $y, $input) {
-    if ($x === null || $y === null) {
-        header('HTTP/1.1 400 Bad Request');
-        print json_encode(['errormesg' => 'Coordinates x and y are required.']);
-        exit;
+
+function assign_initial_tiles($game_id, $player_ids) {
+    foreach ($player_ids as $player_id) {
+        get_tiles($game_id, $player_id);
     }
+}
 
-    $x = intval($x);
-    $y = intval($y);
-
+function handle_players($method, $input) {
     switch ($method) {
         case 'GET':
-            show_tile($x, $y);
+            $player_id = intval($input['player_id'] ?? 0);
+            show_player($player_id);
             break;
-        case 'PUT':
-            if (!isset($input['tile']) || !isset($input['token'])) {
-                header('HTTP/1.1 400 Bad Request');
-                print json_encode(['errormesg' => 'Tile and token are required.']);
-                exit;
-            }
-            place_tile($x, $y, $input['tile'], $input['token']);
-            break;
-        default:
-            header('HTTP/1.1 405 Method Not Allowed');
-            print json_encode(['errormesg' => "Method $method not allowed for resource tile."]);
-            exit;
-    }
-}
-function handle_players($method, $input) {
-    if ($method == 'GET') {
-        show_players();
-    } else {
-        header("HTTP/1.1 400 Bad Request");
-        print json_encode(['errormesg' => "Method $method not allowed for players."]);
-    }
-}
-function handle_status($method) {
-    if ($method == 'GET') {
-        if (!isset($_GET['game_id'])) {
-            header('HTTP/1.1 400 Bad Request');
-            print json_encode(['errormesg' => 'Missing game_id parameter.']);
-            exit;
-        }
 
-        $gameId = intval($_GET['game_id']);
-        show_status($gameId);
-    } else {
-        header('HTTP/1.1 405 Method Not Allowed');
-        print json_encode(['errormesg' => "Method $method not allowed for status."]);
+        default:
+            response_json(405, 'Method not allowed.');
     }
 }
 ?>
