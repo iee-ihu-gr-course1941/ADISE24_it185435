@@ -7,11 +7,36 @@ function create_game($player_count) {
     $stmt->bind_param('i', $player_count);
 
     if ($stmt->execute()) {
-        return $stmt->insert_id;
+        $game_id = $stmt->insert_id;
+
+        // Δημιουργία πλακιδίων για το παιχνίδι
+        $sql_get_attributes = "SELECT attribute_id FROM tileattributes";
+        $result_attributes = $mysqli->query($sql_get_attributes);
+
+        if (!$result_attributes || $result_attributes->num_rows === 0) {
+            response_json(500, 'No tile attributes found.');
+            return false;
+        }
+
+        $sql_insert_tiles = "INSERT INTO tiles (game_id, attribute_id, status) VALUES (?, ?, 'available')";
+        $stmt_insert_tiles = $mysqli->prepare($sql_insert_tiles);
+
+        while ($row = $result_attributes->fetch_assoc()) {
+            $attribute_id = $row['attribute_id'];
+            $stmt_insert_tiles->bind_param('ii', $game_id, $attribute_id);
+
+            if (!$stmt_insert_tiles->execute()) {
+                response_json(500, 'Failed to insert tile: ' . $stmt_insert_tiles->error);
+                return false;
+            }
+        }
+
+        return $game_id;
     }
 
     return false;
 }
+
 function create_players_for_game($game_id, $player_count) {
     global $mysqli;
 
@@ -172,16 +197,33 @@ function add_or_get_player($username, $email) {
 
 
 function generate_board($game_id) {
-    $board = [];
-    for ($i = 0; $i < 5; $i++) {
-        $row = [];
-        for ($j = 0; $j < 5; $j++) {
-            $row[] = '';
-        }
-        $board[] = $row;
+    global $mysqli;
+
+    // Ανάκτηση πλακιδίων για το game_id με status 'available'
+    $sql = "
+        SELECT t.tile_id, t.attribute_id, ta.color, ta.shape
+        FROM tiles t
+        JOIN tileattributes ta ON t.attribute_id = ta.attribute_id
+        WHERE t.game_id = ? AND t.status = 'available'
+    ";
+    $stmt = $mysqli->prepare($sql);
+    $stmt->bind_param('i', $game_id);
+    $stmt->execute();
+    $result = $stmt->get_result();
+
+    $tiles = [];
+    while ($tile = $result->fetch_assoc()) {
+        $tiles[] = [
+            'tile_id' => $tile['tile_id'],
+            'attribute_id' => $tile['attribute_id'],
+            'color' => $tile['color'],
+            'shape' => $tile['shape']
+        ];
     }
-    return $board;
+
+    return $tiles;
 }
+
 
 function swap_tiles($game_id, $tiles) {
     global $mysqli;
@@ -222,21 +264,22 @@ function swap_tiles($game_id, $tiles) {
         return;
     }
 
-    // Ενημέρωση των νέων πλακιδίων ως ανατεθειμένα
+    // Δεν αλλάζουμε το status των νέων πλακιδίων, παραμένουν "available"
     foreach ($new_tiles as $tile) {
         $sql_assign_tile = "
             UPDATE tiles 
-            SET status = 'assigned' 
+            SET row = NULL, col = NULL, status = 'available' 
             WHERE tile_id = ?";
         $stmt_assign_tile = $mysqli->prepare($sql_assign_tile);
         $stmt_assign_tile->bind_param("i", $tile['tile_id']);
 
         if (!$stmt_assign_tile->execute()) {
-            response_json(500, 'Failed to assign new tile: ' . $stmt_assign_tile->error);
+            response_json(500, 'Failed to update new tile: ' . $stmt_assign_tile->error);
             return;
         }
     }
 
+    // Επιστροφή νέων πλακιδίων στον client
     response_json(200, 'Tiles swapped successfully.', ['new_tiles' => $new_tiles]);
 }
 

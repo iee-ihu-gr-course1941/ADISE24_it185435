@@ -6,6 +6,29 @@
     <title>Qwirkler Game</title>
     <!-- Bootstrap CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        /* Μεγαλύτερα κουτάκια για τον πίνακα 5x5 */
+        #game-board td {
+            width: 80px;
+            height: 80px;
+            text-align: center;
+            vertical-align: middle;
+            border: 2px solid #000;
+        }
+
+        /* Στυλ για τα tiles */
+        .tile {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            width: 100px;
+            height: 100px;
+            border: 2px solid #000;
+            margin: 5px;
+            background-size: cover;
+            background-position: center;
+        }
+    </style>
 </head>
 <body>
     <!-- Header -->
@@ -55,7 +78,7 @@
     <div class="container mt-4 d-none" id="game-board-section">
         <div class="row">
             <!-- Game Board -->
-            <div class="col-md-12">
+            <div class="col-md-8">
                 <h2 class="text-center">Game Board</h2>
                 <table class="table table-bordered text-center" id="game-board">
                     <tbody>
@@ -63,98 +86,286 @@
                     </tbody>
                 </table>
             </div>
+
+            <!-- Available Tiles -->
+            <div class="col-md-4">
+                <h2 class="text-center">Available Tiles</h2>
+                <div id="tile-container" class="d-flex flex-wrap justify-content-center">
+                    <!-- Tiles will be dynamically added here -->
+                </div>
+            </div>
         </div>
     </div>
+	<div class="container mt-4 d-none" id="action-buttons-section">
+		<div class="row justify-content-center">
+			<div class="col-md-3 text-center">
+				<button id="swap-button" class="btn btn-warning w-100 mb-3">Swap Tiles</button>
+			</div>
+			<div class="col-md-3 text-center">
+				<button id="undo-button" class="btn btn-secondary w-100 mb-3">Undo Last Action</button>
+			</div>
+			<div class="col-md-3 text-center">
+				<button id="leave-button" class="btn btn-danger w-100 mb-3">Leave Game</button>
+			</div>
+			<div class="col-md-3 text-center">
+				<button id="end-turn-button" class="btn btn-primary w-100 mb-3">End Turn</button>
+			</div>
+		</div>
+	</div>
 
     <!-- Footer -->
     <footer class="bg-dark text-white text-center py-3 mt-4">
-        <p>Qwirkler Game © 2025</p>
+        <p>Qwirkler Game &copy; 2025</p>
     </footer>
-	<script>
-    const preGameSection = document.getElementById('pre-game');
-    const gameBoardSection = document.getElementById('game-board-section');
-    const gameBoard = document.getElementById('game-board');
 
-    // Handle Create Game
-    document.getElementById('create-game-form').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const playerCount = document.getElementById('player-count').value;
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/js/bootstrap.bundle.min.js"></script>
 
-        try {
-            const response = await fetch('http://localhost/MyProject/qwirkler.php/create', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ player_count: playerCount })
-            });
+    <!-- Custom JS -->
+    <script>
+        const preGameSection = document.getElementById('pre-game');
+        const gameBoardSection = document.getElementById('game-board-section');
+        const gameBoard = document.getElementById('game-board');
+		const actionButtonsSection = document.getElementById('action-buttons-section');
 
-            const data = await response.json();
-            if (data.status === 'success') {
-                alert(`Game created successfully. Game ID: ${data.data.game_id}`);
-                startGame(data.data.game_id);
-            } else {
-                alert(`Error: ${data.message}`);
-            }
-        } catch (error) {
-            console.error('Unexpected Error:', error);
-            alert('An unexpected error occurred.');
-        }
-    });
+        // Handle Create Game
+        document.getElementById('create-game-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const playerCount = document.getElementById('player-count').value;
 
-    // Handle Join Game
-    document.getElementById('join-game-form').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const gameId = document.getElementById('game-id').value;
-        const playerName = document.getElementById('player-name').value;
+            try {
+                const response = await fetch('http://localhost/MyProject/qwirkler.php/create', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ player_count: playerCount })
+                });
 
-        try {
-            const response = await fetch('http://localhost/MyProject/qwirkler.php/join', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ game_id: gameId, username: playerName })
-            });
-
-            const data = await response.json();
-            if (data.status === 'success') {
-                alert(`Joined game successfully. Game ID: ${gameId}`);
-                startGame(gameId);
-            } else {
-                alert(`Error: ${data.message}`);
-            }
-        } catch (error) {
-            console.error('Unexpected Error:', error);
-            alert('An unexpected error occurred.');
-        }
-    });
-
-    // Start Game
-    function startGame(gameId) {
-        preGameSection.classList.add('d-none');
-        gameBoardSection.classList.remove('d-none');
-
-        // Fetch and render game board
-        fetch(`http://localhost/MyProject/qwirkler.php/board?game_id=${gameId}`)
-            .then(response => response.json())
-            .then(data => {
+                const data = await response.json();
                 if (data.status === 'success') {
-                    renderBoard(data.data.board);
+                    alert(`Game created successfully. Game ID: ${data.data.game_id}`);
+                    startGame(data.data.game_id);
+                } else {
+                    alert(`Error: ${data.message}`);
                 }
-            });
-    }
-
-    // Render Game Board
-    function renderBoard(board) {
-        gameBoard.innerHTML = '';
-        for (const row in board) {
-            const tr = document.createElement('tr');
-            for (const col in board[row]) {
-                const td = document.createElement('td');
-                td.textContent = board[row][col].color || ''; // Χρώμα πλακιδίου
-                tr.appendChild(td);
+            } catch (error) {
+                console.error('Unexpected Error:', error);
+                alert('An unexpected error occurred.');
             }
-            gameBoard.appendChild(tr);
-        }
-    }
-</script>
+        });
 
+        // Handle Join Game
+        document.getElementById('join-game-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const gameId = document.getElementById('game-id').value;
+            const playerName = document.getElementById('player-name').value;
+
+            try {
+                const response = await fetch('http://localhost/MyProject/qwirkler.php/join', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ game_id: gameId, username: playerName })
+                });
+
+                const data = await response.json();
+                if (data.status === 'success') {
+                    alert(`Joined game successfully. Game ID: ${gameId}`);
+                    startGame(gameId);
+                } else {
+                    alert(`Error: ${data.message}`);
+                }
+            } catch (error) {
+                console.error('Unexpected Error:', error);
+                alert('An unexpected error occurred.');
+            }
+        });
+
+        let currentGameId = null;
+
+		// Start Game (Updated to Show Buttons)
+		function startGame(gameId) {
+			currentGameId = gameId;
+			preGameSection.classList.add('d-none');
+			gameBoardSection.classList.remove('d-none');
+			showActionButtons();
+
+			// Fetch and render game board
+			fetch(`http://localhost/MyProject/qwirkler.php/board?game_id=${gameId}`)
+				.then(response => response.json())
+				.then(data => {
+					console.log('Backend Response:', data); // Debugging
+					if (data.status === 'success') {
+						renderBoard(data.data);
+					} else {
+						console.error('Error fetching board:', data.message);
+					}
+				})
+				.catch(error => console.error('Unexpected Error:', error));
+		}
+
+        // Render Game Board and Available Tiles
+        // Render Available Tiles (Display 6 random tiles with icons)
+		function renderBoard(data) {
+			const board = data.board || [];
+			const tiles = data.tiles || [];
+
+			// Render Board
+			gameBoard.innerHTML = '';
+			for (let i = 0; i < 5; i++) {
+				const tr = document.createElement('tr');
+				for (let j = 0; j < 5; j++) {
+					const td = document.createElement('td');
+					if (board[i] && board[i][j]) {
+						const cell = board[i][j];
+						td.textContent = cell.color ? `${cell.color[0]}${cell.shape[0]}` : ''; // Εμφάνιση αρχικών
+						td.style.backgroundColor = cell.color || ''; // Χρώμα φόντου
+					}
+					tr.appendChild(td);
+				}
+				gameBoard.appendChild(tr);
+			}
+
+			// Render Available Tiles (Display 6 random tiles with icons)
+			const tileContainer = document.getElementById('tile-container');
+			tileContainer.innerHTML = '';
+
+			const randomTiles = tiles.sort(() => 0.5 - Math.random()).slice(0, 6); // Επιλογή 6 τυχαίων πλακιδίων
+
+			randomTiles.forEach(tile => {
+				const key = `${tile.color}_${tile.shape}`.toLowerCase();
+				const tileImage = tileImageMap[key];
+				if (tileImage) {
+					const tileElement = document.createElement('div');
+					tileElement.classList.add('tile');
+					tileElement.style.backgroundImage = `url('/MyProject/lib/icons/${tileImage}.png')`;
+					tileContainer.appendChild(tileElement);
+				}
+			});
+		}
+
+		// Mapping των εικόνων με τα χρώματα και τα σχήματα
+		const tileImageMap = {
+			"blue_circle": "BL_C",
+			"blue_square": "BL_SQ",
+			"blue_star": "BL_ST",
+			"blue_triangle": "BL_T",
+			"blue_diamond": "BL_R",
+			"green_circle": "BR_C",
+			"green_square": "BR_SQ",
+			"green_star": "BR_ST",
+			"green_triangle": "BR_T",
+			"green_diamond": "BR_R",
+			"orange_circle": "O_C",
+			"orange_square": "O_SQ",
+			"orange_star": "O_ST",
+			"orange_triangle": "O_T",
+			"purple_circle": "P_C",
+			"purple_square": "P_SQ",
+			"purple_star": "P_ST",
+			"purple_triangle": "P_T",
+			"purple_diamond": "P_R",
+			"red_circle": "R_C",
+			"red_square": "R_SQ",
+			"red_star": "R_ST",
+			"red_triangle": "R_T",
+			"red_diamond": "R_R",
+			"yellow_circle": "Y_C",
+			"yellow_square": "Y_SQ",
+			"yellow_star": "Y_ST",
+			"yellow_triangle": "Y_S",
+			"yellow_diamond": "Y_R"
+		};
+		function showActionButtons() {
+			actionButtonsSection.classList.remove('d-none');
+		}
+
+		// Handle Swap Tiles
+		document.getElementById('swap-button').addEventListener('click', async () => {
+			try {
+				const response = await fetch('http://localhost/MyProject/qwirkler.php/actions', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ action: 'swap', game_id: currentGameId, tiles: [1, 2, 3] }) // Update as needed
+				});
+
+				const data = await response.json();
+				if (data.status === 'success') {
+					alert('Tiles swapped successfully!');
+					startGame(currentGameId); // Refresh game state
+				} else {
+					alert(`Error: ${data.message}`);
+				}
+			} catch (error) {
+				console.error('Unexpected Error:', error);
+				alert('An unexpected error occurred while swapping tiles.');
+			}
+		});
+
+		// Handle Undo Last Action
+		document.getElementById('undo-button').addEventListener('click', async () => {
+			try {
+				const response = await fetch('http://localhost/MyProject/qwirkler.php/actions', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ action: 'undo', game_id: currentGameId })
+				});
+
+				const data = await response.json();
+				if (data.status === 'success') {
+					alert('Last action undone successfully!');
+					startGame(currentGameId); // Refresh game state
+				} else {
+					alert(`Error: ${data.message}`);
+				}
+			} catch (error) {
+				console.error('Unexpected Error:', error);
+				alert('An unexpected error occurred while undoing the last action.');
+			}
+		});
+
+		// Handle Leave Game
+		document.getElementById('leave-button').addEventListener('click', async () => {
+			try {
+				const response = await fetch('http://localhost/MyProject/qwirkler.php/actions', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ action: 'leave', game_id: currentGameId })
+				});
+
+				const data = await response.json();
+				if (data.status === 'success') {
+					alert('You have left the game successfully!');
+					location.reload(); // Reload the page
+				} else {
+					alert(`Error: ${data.message}`);
+				}
+			} catch (error) {
+				console.error('Unexpected Error:', error);
+				alert('An unexpected error occurred while leaving the game.');
+			}
+		});
+
+		// Handle End Turn
+		document.getElementById('end-turn-button').addEventListener('click', async () => {
+			try {
+				const response = await fetch('http://localhost/MyProject/qwirkler.php/actions', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ action: 'end_turn', game_id: currentGameId })
+				});
+
+				const data = await response.json();
+				if (data.status === 'success') {
+					alert('Turn ended successfully!');
+					startGame(currentGameId); // Refresh game state
+				} else {
+					alert(`Error: ${data.message}`);
+				}
+			} catch (error) {
+				console.error('Unexpected Error:', error);
+				alert('An unexpected error occurred while ending your turn.');
+			}
+		});
+
+    </script>
 </body>
 </html>

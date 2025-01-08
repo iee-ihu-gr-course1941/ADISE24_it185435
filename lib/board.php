@@ -3,30 +3,45 @@
 function show_board($game_id) {
     global $mysqli;
 
-    $query = "
+    // Δημιουργία κενού πίνακα 5x5
+    $board = [];
+    for ($i = 0; $i < 5; $i++) {
+        $row = [];
+        for ($j = 0; $j < 5; $j++) {
+            $row[$j] = ''; // Κενό κελί
+        }
+        $board[$i] = $row;
+    }
+
+    // Ανάκτηση διαθέσιμων πλακιδίων
+    $query_tiles = "
         SELECT 
-            b.x, b.y, b.attribute_id, ta.color, ta.shape, b.status 
-        FROM board b
-        LEFT JOIN tileattributes ta ON b.attribute_id = ta.attribute_id
-        WHERE b.game_id = ?
+            t.tile_id, t.attribute_id, ta.color, ta.shape
+        FROM tiles t
+        JOIN tileattributes ta ON t.attribute_id = ta.attribute_id
+        WHERE t.game_id = ? AND t.status = 'available'
     ";
 
-    $stmt = $mysqli->prepare($query);
-    $stmt->bind_param("i", $game_id);
-    $stmt->execute();
-    $result = $stmt->get_result();
+    $stmt_tiles = $mysqli->prepare($query_tiles);
+    $stmt_tiles->bind_param("i", $game_id);
+    $stmt_tiles->execute();
+    $result_tiles = $stmt_tiles->get_result();
 
-    $board = [];
-    while ($row = $result->fetch_assoc()) {
-        $board[$row['x']][$row['y']] = [
-            "attribute_id" => $row['attribute_id'],
-            "color" => $row['color'],
-            "shape" => $row['shape'],
-            "status" => $row['status']
+    $tiles = [];
+    while ($tile = $result_tiles->fetch_assoc()) {
+        $tiles[] = [
+            "tile_id" => $tile['tile_id'],
+            "attribute_id" => $tile['attribute_id'],
+            "color" => $tile['color'],
+            "shape" => $tile['shape']
         ];
     }
 
-    response_json(200, 'Board retrieved successfully', ["board" => $board]);
+    // Επιστροφή δεδομένων
+    response_json(200, 'Board and tiles retrieved successfully', [
+        "board" => $board,
+        "tiles" => $tiles
+    ]);
 }
 
 function reset_board($game_id) {
